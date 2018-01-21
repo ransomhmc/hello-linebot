@@ -1,8 +1,6 @@
 
-var express = require('express')
-var bodyParser = require('body-parser')
-
-const config = require('./config.json')
+const express = require('express')
+const bodyParser = require('body-parser')
 const util = require('util')
 const app = express()
 const rp = require('request-promise')
@@ -21,21 +19,6 @@ function saveContent(messageID, filename,accessToken) {
           'Authorization': 'Bearer '+accessToken
         }
       }
-
-/*
-    request.get(options).then(function (res) {
-        const buffer = Buffer.from(res, 'utf8');
-        fs.writeFile('/tmp/'+filename, buffer,(error) => {
-            if (error) {
-                console.log('write to file failed: '+filename)
-            }
-            else {
-                console.log('wite to file success: '+filename)
-            }
-        })
-    })
-*/
-
     request(options).pipe(fs.createWriteStream('/tmp/'+filename))
 }
 
