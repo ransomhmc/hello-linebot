@@ -11,6 +11,49 @@ const sprintf = require('sprintf-js').sprintf
 
 const accessToken = 'ERxfigZXQqCeQWfiufODGZQn0XWbFf/lzAoHGHfUdI/5WJx51bIGq19AUCoefELDFRWfX82ssyUp+KYKfq+/6/JxMerB/tfmZBItylfmnigb62nGtL4nLSfKjLWPnsjPX/zAxgWK+b1BvBLj9rYf1AdB04t89/1O/w1cDnyilFU='
 
+
+//google cloud storage
+const Storage = require('@google-cloud/storage');
+const config = require('./config');
+const CLOUD_BUCKET = config.get('CLOUD_BUCKET');
+
+const storage = Storage({
+  projectId: config.get('GCLOUD_PROJECT')
+});
+const bucket = storage.bucket(CLOUD_BUCKET);
+//
+
+var amqp = require('amqplib/callback_api');
+
+function sendUploadToGCS (req, res, next) {
+  if (!req.file) {
+    return next();
+  }
+
+  const gcsname = Date.now() + req.file.originalname;
+  const file = bucket.file(gcsname);
+
+  const stream = file.createWriteStream({
+    metadata: {
+      contentType: req.file.mimetype
+    }
+  });
+
+  stream.on('error', (err) => {
+    console.log(error);
+  });
+
+  stream.on('finish', () => {
+    req.file.cloudStorageObject = gcsname;
+    file.makePublic().then(() => {
+      req.file.cloudStoragePublicUrl = getPublicUrl(gcsname);
+      next();
+    });
+  });
+
+  stream.end(req.file.buffer);
+}
+
 function saveContent(messageID, filename,accessToken) {
     let options = {
         method: 'GET',
@@ -19,7 +62,11 @@ function saveContent(messageID, filename,accessToken) {
           'Authorization': 'Bearer '+accessToken
         }
       }
-    request(options).pipe(fs.createWriteStream('/tmp/'+filename))
+
+    console.log('download begin:' + filename)
+    request(options).pipe(fs.createWriteStream('/tmp/'+filename)).on('finish', () => {
+      console.log('download finish:' + filename)
+    })
 }
 
 app.use(bodyParser.json()); // for parsing application/json
@@ -44,7 +91,7 @@ app.post('/webhook', (req,resp) => {
     }
     if ((req.body.events[0].type == 'message') &&
         (req.body.events[0].message.type == 'text')) {
-        console.log('text:'+req.body.events[0].message.text)
+          msg_handler_text(req.body.events[0].message.text,req.body.events[0]);
     }
 
     if ((req.body.events[0].type == 'message') &&
@@ -59,27 +106,56 @@ app.post('/webhook', (req,resp) => {
     }
 })
 
+function line_reply(replyToken,text) {
+  return rp({
+    uri : 'https://api.line.me/v2/bot/message/reply',
+    method : 'POST',
+    headers: {
+      'Content-Type' : 'application/json',
+      'Authorization' : 'Bearer '+accessToken
+    },
+    body : {
+      replyToken : replyToken,
+      messages : [{type: 'text' , text : text}]
+    },
+    json : true
+  });
+}
+
+function bitly_shorten(url_long) {
+  return rp({
+    uri : 'https://api-ssl.bitly.com/v4/shorten',
+    method : 'POST',
+    headers : {
+      'Authorization' : 'Bearer e745bd6e149b4dbf00a7b70ad15436c2cfda9893'
+    },
+    json : true,
+    body : {
+      group_guid : 'Bj1ud03EG05',
+      long_url : url_long
+    }
+  }); 
+}
+
+async function msg_handler_text(text,event) {
+  console.log('text:'+text);
+  if (text.startsWith('http')) {
+    let bitly_response = await bitly_shorten(text);
+    console.log('bitly:'+util.inspect(bitly_response));
+    let line_reply_result = await line_reply(event.replyToken,bitly_response.link);
+    return;
+  }
+  line_reply(event.replyToken,'huh?');
+}
 var listFiles = []
 
 app.get('/api/list',(req,res) => {
     res.json(listFiles)
 })
 
-var server = app.listen(process.env.PORT || 8080, function() {
+var server = app.listen(process.env.PORT || 3000, function() {
     var port = server.address().port;
     console.log("My Line bot App running on port", port);
-});
-
-fs.readdir('./', function(err, items) {
-    console.log(items);
-    for (var i=0;i<items.length;i++) {
-        console.log(items[i])
-        if (items[i].endsWith('mp4')) {
-            listFiles.push(items[i])
-            console.log('pushed to array:')
-            console.log(listFiles)
-        }
-    }
 });
 
 //saveContent('4321','aloha.jpg','faketoken')
